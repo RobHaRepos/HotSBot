@@ -1,4 +1,8 @@
 {
+    "sonarlint.connectedMode.project": {
+        "connectionId": "robharepos",
+        "projectKey": "RobHaRepos_HotSBot"
+    },
     "python.testing.pytestArgs": [
         "tests"
     ],

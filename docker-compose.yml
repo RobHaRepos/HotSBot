@@ -1,0 +1,30 @@
+services:
+  parser:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hotsbot-parser:latest
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx, sys; r = httpx.get('http://127.0.0.1:8000/health', timeout=2.0); sys.exit(0 if r.status_code==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hotsbot-bot:latest
+    command: ["python", "-m", "app.replay_parser.src.discord"]
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      PARSE_API_URL: http://parser:8000/parse-replay/upload
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      parser:
+        condition: service_healthy
+    restart: unless-stopped
+

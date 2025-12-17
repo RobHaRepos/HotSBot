@@ -1,1 +1,11 @@
 data/replays/*.StormReplay
+.venv/
+__pycache__/
+*.pyc
+.coverage
+coverage.xml
+pytest_cache/
+.vscode/
+scripts/
+output-*
+.env
