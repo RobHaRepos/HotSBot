@@ -1,7 +1,7 @@
 import logging
 import subprocess
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from .extract_replay_details import extract_details_from_file
@@ -133,6 +133,88 @@ def _build_visible_rows(store: InMemoryStatsStore) -> list[tuple[str, list[Value
     return [(row.category, row.values) for row in store.iter_rows() if row.category not in REMOVED_TABLE_CATEGORIES]
 
 
+def _try_int(value: object) -> int | None:
+    """Return int(value) or None if conversion fails."""
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except Exception:
+        return None
+
+
+def _winner_from_counts(blue_wins: int, red_wins: int) -> str | None:
+    """Return the winning team label from win counts."""
+    if blue_wins > red_wins:
+        return "blue"
+    if red_wins > blue_wins:
+        return "red"
+    return None
+
+
+def _count_wins_by_team_id(players: Sequence[object]) -> tuple[int, int, bool]:
+    """Count wins using teamId/result attributes; returns (blue_wins, red_wins, has_data)."""
+    blue_wins = 0
+    red_wins = 0
+    has_any = False
+
+    for p in players:
+        team_id = getattr(p, "teamId", None)
+        result = getattr(p, "result", None)
+        if team_id not in (0, 1) or result is None:
+            continue
+
+        result_int = _try_int(result)
+        if result_int is None:
+            continue
+
+        # heroprotocol uses 1=win, 2=loss (observed in output-all.txt)
+        has_any = True
+        if result_int != 1:
+            continue
+
+        if int(team_id) == 0:
+            blue_wins += 1
+        else:
+            red_wins += 1
+
+    return blue_wins, red_wins, has_any
+
+
+def _count_wins_by_halves(players: Sequence[object]) -> tuple[int, int]:
+    """Count wins using first-half/second-half ordering as a fallback."""
+    half = max(1, len(players) // 2)
+    blue_wins = 0
+    red_wins = 0
+
+    for idx, p in enumerate(players):
+        result = getattr(p, "result", None)
+        if result is None:
+            continue
+
+        result_int = _try_int(result)
+        if result_int != 1:
+            continue
+
+        if idx < half:
+            blue_wins += 1
+        else:
+            red_wins += 1
+
+    return blue_wins, red_wins
+
+
+def _derive_winning_team(players: Sequence[object]) -> str | None:
+    """Return 'blue' or 'red' when a winner can be inferred from player results."""
+    if not players:
+        return None
+
+    blue_wins, red_wins, has_team_data = _count_wins_by_team_id(players)
+    if has_team_data:
+        return _winner_from_counts(blue_wins, red_wins)
+
+    blue_wins, red_wins = _count_wins_by_halves(players)
+    return _winner_from_counts(blue_wins, red_wins)
+
+
 def parse_and_build_table(replay: str) -> bytes:
     """Parse a replay file and build a statistics table."""
     artifacts = parse_replay_with_cli(replay, flags=["--details", "--trackerevents", "--header"])
@@ -147,6 +229,10 @@ def parse_and_build_table(replay: str) -> bytes:
         player_labels = [(player.name or "") for player in table_header.players]
 
         player_count = len(player_labels)
+
+        winning_team = _derive_winning_team(table_header.players)
+        team_blue_name = "TEAM BLUE" + (" WIN" if winning_team == "blue" else "")
+        team_red_name = "TEAM RED" + (" WIN" if winning_team == "red" else "")
 
         store = InMemoryStatsStore(player_labels=player_labels)
 
@@ -173,8 +259,8 @@ def parse_and_build_table(replay: str) -> bytes:
             player_hero_names=hero_names,
             player_hero_portrait_paths=hero_portrait_paths,
             team_header=TeamHeaderOptions(
-                team_blue_name="TEAM BLUE",
-                team_red_name="TEAM RED",
+                team_blue_name=team_blue_name,
+                team_red_name=team_red_name,
                 team_blue_level=team_blue_level,
                 team_red_level=team_red_level,
                 team_blue_kills=team_blue_kills,

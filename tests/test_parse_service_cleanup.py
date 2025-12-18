@@ -83,3 +83,36 @@ def test_parse_and_build_table_cleans_up_even_on_error(monkeypatch: pytest.Monke
 
     for value in artifacts.values():
         assert not Path(value).exists()
+
+
+def test_derive_winning_team_uses_team_id_and_result():
+    """Derive winning team from teamId + result (1=win, 2=loss)."""
+
+    class P:
+        def __init__(self, team_id: int, result: int):
+            setattr(self, "teamId", team_id)
+            self.result = result
+
+    players = [
+        P(0, 2),
+        P(0, 2),
+        P(1, 1),
+        P(1, 1),
+    ]
+    assert parse_service._derive_winning_team(players) == "red"
+
+
+def test_derive_winning_team_falls_back_to_halves_when_team_id_missing():
+    """Fall back to first-half/second-half ordering if teamId is unavailable."""
+
+    class P:
+        def __init__(self, result: int):
+            self.result = result
+
+    players = [
+        P(1),
+        P(1),
+        P(2),
+        P(2),
+    ]
+    assert parse_service._derive_winning_team(players) == "blue"
