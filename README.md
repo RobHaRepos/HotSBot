@@ -4,6 +4,9 @@ HotSBot turns a Heroes of the Storm replay (`.StormReplay`) into a readable PNG 
 
 **What gets parsed for the table:** the replay header/details for metadata (players, heroes, map, duration) plus tracker events for the actual stat values; game events can also be parsed, but the PNG table is primarily derived from tracker events.
 
+## Example statistic
+![Example statistic](data/images/stat_showcase.png)
+
 ## Quickstart
 
 ### Local (venv)
