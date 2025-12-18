@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Run startup/shutdown hooks for the FastAPI app."""
     configure_logging()
     logger.info("Starting Replay Parser API...")
     yield
@@ -32,6 +33,7 @@ class ReplayParseRequest(BaseModel):
 
 
 def _to_http_exception(exc: Exception) -> HTTPException:
+    """Normalize internal exceptions to an HTTPException."""
     if isinstance(exc, (MissingReplayArtifactsError, ValueError)):
         return HTTPException(status_code=400, detail=str(exc))
     return HTTPException(status_code=500, detail="Failed to parse replay")

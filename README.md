@@ -1,110 +1,66 @@
-# replay_parser (POC)
+[![CI](https://github.com/RobHaRepos/HotSBot/actions/workflows/ci-build.yaml/badge.svg)](https://github.com/RobHaRepos/HotSBot/actions/workflows/ci-build.yaml) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=RobHaRepos_HotSBot&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=RobHaRepos_HotSBot) [![Snyk Vulnerabilities](https://snyk.io/test/github/RobHaRepos/HotSBot/badge.svg)](https://snyk.io/test/github/RobHaRepos/HotSBot) [![Python](https://img.shields.io/badge/python-3.11-blue)](https://www.python.org/) ![Coverage](https://raw.githubusercontent.com/RobHaRepos/HotSBot/main/coverage.svg)
 
-This microservice parses Heroes of the Storm replay files (.StormReplay) using the Blizzard `heroprotocol` CLI tool.  
-This folder contains a small Proof-of-Concept (POC) parser implemented in `app/replay_parser/src/parser.py`. The POC wrapper calls the `heroprotocol` CLI and parses the newline-delimited JSON objects that `--json` emits.
+HotSBot turns a Heroes of the Storm replay (`.StormReplay`) into a readable PNG stats table. It ships as a small FastAPI service (upload/parse endpoint) and an optional Discord bot that posts the generated image. Parsing is powered by Blizzard's `heroprotocol` (vendored in this repo for convenience). Hero portraits are downloaded and cached locally to keep rendering fast and offline-friendly. The codebase is intentionally small: one pipeline to parse → aggregate → render.
 
-## Requirements
-- Python 3.7–3.11 recommended (3.11 preferred).
-- heroprotocol; `mpyq`, `six`, `protobuf` as dependencies.
+**What gets parsed for the table:** the replay header/details for metadata (players, heroes, map, duration) plus tracker events for the actual stat values; game events can also be parsed, but the PNG table is primarily derived from tracker events.
 
-Install quick (pip):
+## Quickstart
 
-```powershell
-python -m pip install -r app/replay_parser/requirements.txt
-```
-
-To use locally, install the required packages including `heroprotocol`:
+### Local (venv)
 
 ```powershell
-python -m pip install --upgrade pip
-python -m pip install -r app/replay_parser/requirements.txt
+python -m pip install -r requirements.txt
+pytest
 ```
 
-## CLI usage (heroprotocol)
-Basic form:
+Run the API:
 
 ```powershell
-python -m heroprotocol [FLAGS] replay_file.StormReplay
+python -m uvicorn app.replay_parser.src.parser_api:app --host 0.0.0.0 --port 8000
 ```
 
-Flags (as exposed by `heroprotocol` CLI):
-- `--gameevents` — print game events (coordinates included)
-- `--messageevents` — print message events (pings, chat messages)
-- `--trackerevents` — print tracker events (unit births / deaths / stats)
-- `--attributeevents` — print attribute events (attr id and values)
-- `--header` — print protocol header (build id, elapsedGameLoops)
-- `--details` — print replay details (players, teams, heroes)
-- `--initdata` — print initialization data (player settings / cache handles)
-- `--stats` — print stats summary for the event stream
-- `--json` — output JSON objects (newline-delimited streaming JSON)
-
-Examples:
+### Docker
 
 ```powershell
-# Print details
-python -m heroprotocol --header "data\replays\2025-12-09 17.29.31 Silver City.StormReplay" > output-header.txt
-python -m heroprotocol --details "data\replays\2025-12-09 17.29.31 Silver City.StormReplay" > output-details.txt
-python -m heroprotocol --initdata "data\replays\2025-12-09 17.29.31 Silver City.StormReplay" > output-initdata.txt
-python -m heroprotocol --stats "data\replays\2025-12-09 17.29.31 Silver City.StormReplay" > output-stats.txt
-python -m heroprotocol --gameevents "data\replays\2025-12-09 17.29.31 Silver City.StormReplay" > output-gameevents.txt
-python -m heroprotocol --messageevents "data\replays\2025-12-09 17.29.31 Silver City.StormReplay" > output-messageevents.txt
-python -m heroprotocol --trackerevents "data\replays\2025-12-09 17.29.31 Silver City.StormReplay" > output-trackerevents.txt
-python -m heroprotocol --attributeevents "data\replays\2025-12-09 17.29.31 Silver City.StormReplay" > output-attributeevents.txt
-
-# Combined: all flags into one file (useful for full dump)
-python -m heroprotocol --header --details --initdata --stats --gameevents --messageevents --trackerevents --attributeevents "data\replays\2025-12-09 17.29.31 Silver City.StormReplay" > output-all.txt
-
-# Stream JSON objects for details and tracker events
-python -m heroprotocol --details --trackerevents --json "data/replays/example.StormReplay" > output.json
+docker compose up -d
 ```
 
-Note: `--json` produces a stream of JSON objects (newline-delimited/sequence of objects), not a single array. When consuming programmatically, parse line-by-line or use `jq -s` to combine into a single JSON array.
+## Configuration
 
-## Implemented POC
-- `app/replay_parser/src/parser.py` — a small wrapper that runs `python -m heroprotocol --json <flags> <file>` via `subprocess`, then parses the emitted newline-delimited JSON into a list of Python objects. The primary helper is `parse_replay_with_cli(path, flags)`.
+- `PARSE_API_URL` (Discord bot) — where to POST the replay upload (defaults to `http://localhost:8000/parse-replay/`).
+- `DISCORD_TOKEN` (Discord bot) — the bot token.
 
-## Project structure (where to find things)
-- `app/replay_parser/src/parser.py` — local POC CLI wrapper and parsing helpers (invokes `heroprotocol` CLI or library depending on your env).
-- `data/replays/` — sample replay files used for local POC testing.
-- `tests/` — repo unit tests (runs against parse helpers / POC scripts).
+## Project structure
 
-## POC script
-- `app/replay_parser/src/parser.py` — the POC wrapper that invokes `heroprotocol` via subprocess and returns parsed JSON objects; call `parse_replay_with_cli(path, flags)` to parse a replay and receive a list of objects.
+- `app/replay_parser/` — main application package.
+- `data/replays/` — sample replays for local testing.
+- `data/images/heroes/` — cached hero portraits (`.png`) plus URL sidecars.
+- `tests/` — pytest suite.
+- `heroprotocol/` — vendored upstream dependency (do not modify for this project’s quality goals).
 
-## Running examples
-- Run `heroprotocol` directly:
+## Key files
 
-```powershell
-python -m heroprotocol --details --trackerevents --json "data/replays/2025-12-09 17.29.31 Silver City.StormReplay" > output.txt
-```
+- `app/replay_parser/src/parser_api.py` — FastAPI app exposing replay parsing endpoints (path and upload).
+- `app/replay_parser/src/parse_service.py` — orchestration layer that runs the replay parse, builds rows, renders PNG, and cleans up artifacts.
+- `app/replay_parser/src/statistic_png_renderer.py` — PNG renderer (table layout, fonts, team coloring, best-value highlighting).
+- `app/replay_parser/src/extract_replay_header.py` — reads the parsed header output into a typed model.
+- `app/replay_parser/src/extract_replay_details.py` — reads the parsed details output into a typed model (players/map).
+- `app/replay_parser/src/extract_replay_tracker_events.py` — parses tracker events and converts them into derived stat rows.
+- `app/replay_parser/src/extract_replay_tracker_events.py` also contains helpers for parsing event streams; game events support can be added similarly if you want richer timeline analysis.
+- `app/replay_parser/src/web_scaper_hero_img.py` — scrapes/downloads hero portraits and maintains a local cache.
+- `app/replay_parser/src/discord.py` — Discord bot that uploads replays to the API and posts the PNG result (includes a context-menu delete for bot-authored messages).
 
-- Run the POC wrapper from Python:
+## Troubleshooting
 
-```powershell
-python -c "from replay_parser.parser import parse_replay_with_cli; print(parse_replay_with_cli('data/replays/2025-12-09 17.29.31 Silver City.StormReplay', ['--details','--trackerevents','--json']))"
-```
+- If parsing suddenly fails right after a Heroes of the Storm patch, the replay build may be newer than the bundled `heroprotocol` supports. Update the vendored `heroprotocol/` (or bump the dependency) to a version that includes the new protocol/build, then rebuild your image and re-run tests.
 
-## Notes on the `heroprotocol` CLI JSON format
-The `--json` output is a stream of newline-delimited JSON objects representing header/details/init/game/tracker events. For programmatic consumption, parse line-by-line and collect objects of interest (e.g. `details`, `header`, or `tracker` events). Example snippet:
+## Optional data (future)
 
-```python
-import json
-with open('output.txt', 'r', encoding='utf-8') as fh:
-    for line in fh:
-        try:
-            obj = json.loads(line)
-            # handle obj
-        except json.JSONDecodeError:
-            pass
-```
+- Talent choices/builds, hero levels, and full team comp (roles).
+- Match outcome per player/team and timestamps for major events.
+- Map objective timing (e.g., tributes, immortals) and structure damage timeline.
+- Chat/message events for pings and team coordination analysis.
 
-## Credits & License
-- This project integrates Blizzard's `heroprotocol` library: https://github.com/Blizzard/heroprotocol
-- Ship responsibly and follow the upstream MIT license.
+## Credits
 
-## Next steps
-- Add a FastAPI wrapper to accept replay uploads and return parsed JSON.
-- Normalize parsed output into a stable JSON schema for downstream services.
-
----
-Short and ready for copy/paste usage. For additional guidance or to wire up an HTTP microservice, tell me which option you want next (FastAPI wrapper / summary extraction / queue consumer).
+- `heroprotocol` (Blizzard): https://github.com/Blizzard/heroprotocol

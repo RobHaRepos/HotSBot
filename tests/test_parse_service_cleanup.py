@@ -1,3 +1,5 @@
+"""Tests for artifact cleanup behavior in parse_service."""
+
 from pathlib import Path
 
 import pytest
@@ -6,6 +8,7 @@ from app.replay_parser.src import parse_service
 
 
 def _patch_common(monkeypatch, tmp_path: Path):
+    """Patch common parse_service dependencies for deterministic tests."""
     monkeypatch.setattr(parse_service, "OUTPUT_DIR", tmp_path)
 
     class DummyPlayer:
@@ -32,6 +35,7 @@ def _patch_common(monkeypatch, tmp_path: Path):
 
 
 def _create_artifacts(tmp_path: Path) -> dict[str, str]:
+    """Create dummy artifact files and return the artifact map."""
     details = tmp_path / "example.details"
     tracker = tmp_path / "example.trackerevents"
     header = tmp_path / "example.header"
@@ -41,6 +45,7 @@ def _create_artifacts(tmp_path: Path) -> dict[str, str]:
 
 
 def test_parse_and_build_table_removes_artifacts_after_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Delete artifact files after a successful parse_and_build_table run."""
     _patch_common(monkeypatch, tmp_path)
 
     artifacts = _create_artifacts(tmp_path)
@@ -58,6 +63,7 @@ def test_parse_and_build_table_removes_artifacts_after_success(monkeypatch: pyte
 
 
 def test_parse_and_build_table_cleans_up_even_on_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Delete artifact files even when the build pipeline raises."""
     _patch_common(monkeypatch, tmp_path)
 
     artifacts = _create_artifacts(tmp_path)

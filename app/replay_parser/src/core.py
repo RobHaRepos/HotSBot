@@ -36,4 +36,5 @@ class ParseApiError(ReplayParserError):
     detail: str
 
     def __str__(self) -> str:
+        """Return a user-friendly error string."""
         return f"Parse API error ({self.status_code}): {self.detail}"

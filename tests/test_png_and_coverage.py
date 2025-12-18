@@ -1,3 +1,5 @@
+"""Integration and unit tests for parsing and PNG rendering."""
+
 from __future__ import annotations
 
 import io
@@ -55,6 +57,7 @@ def _is_white(px: tuple[int, int, int], threshold: int = 240) -> bool:
 
 
 def test_in_memory_store_basic_behaviour():
+    """Exercise basic InMemoryStatsStore operations and validation."""
     store = InMemoryStatsStore(["A", "B", "C"])
     assert store.player_count == 3
 
@@ -75,8 +78,12 @@ def test_in_memory_store_basic_behaviour():
     with pytest.raises(ValueError):
         store.set_row("Bad", [1, 2])
 
+    store.clear()
+    assert store.get_row("Kills") is None
+
 
 def test_parse_tracker_events_and_build_kda_rows_from_sample_outputs(tmp_path: Path):
+    """Parse minimal tracker events and build K/D/A rows."""
     sample_event = "{\n  '_event': 'NNet.Replay.Tracker.SScoreResultEvent',\n  'm_instanceList': [\n    {'m_name': 'SoloKill', 'm_values': [[{'m_value': 1}]]},\n    {'m_name': 'Deaths', 'm_values': [[{'m_value': 0}], [{'m_value': 1}], [{'m_value': 0}]]},\n  ]\n}\n"
     track_path = tmp_path / "track.txt"
     track_path.write_text(sample_event, encoding="utf-8")
@@ -91,11 +98,12 @@ def test_parse_tracker_events_and_build_kda_rows_from_sample_outputs(tmp_path: P
     deaths = store.get_row("Deaths")
     assert kills is not None and len(kills) == 10
     assert deaths is not None and len(deaths) == 10
-    assert any(v > 0 for v in kills)
-    assert any(v > 0 for v in deaths)
+    assert any(isinstance(v, int) and v > 0 for v in kills)
+    assert any(isinstance(v, int) and v > 0 for v in deaths)
 
 
 def test_png_renderer_outputs_valid_png_bytes():
+    """Render a simple table and validate PNG output bytes."""
     player_labels = [f"P{i+1}" for i in range(10)]
     rows = [
         ("Kills", list(range(10))),
@@ -113,14 +121,14 @@ def test_png_renderer_outputs_valid_png_bytes():
 
 
 def test_png_renderer_legacy_layout_outputs_valid_png_bytes():
-    """Legacy (non-transposed) layout still renders a valid PNG."""
+    """Render a small table and validate PNG bytes."""
     player_labels = [f"P{i+1}" for i in range(5)]
     rows = [
         ("Kills", [1, 2, 3, 4, 5]),
         ("Deaths", [0, 1, 0, 1, 0]),
     ]
 
-    png_bytes = render_stats_store_to_png(player_labels=player_labels, rows=rows, transpose=False)
+    png_bytes = render_stats_store_to_png(player_labels=player_labels, rows=rows)
     assert isinstance(png_bytes, (bytes, bytearray))
     assert png_bytes[:8] == b"\x89PNG\r\n\x1a\n"
 
@@ -176,7 +184,7 @@ def test_header_extra_increases_row_height():
         ("Other", [3, 4, 5]),
     ]
 
-    table_text, _ = _build_table_text(player_labels, rows, transpose=True)
+    table_text, _ = _build_table_text(player_labels, rows)
     font, font_bold = _load_fonts(18)
 
     _, row_h0, _, _, _ = _measure_layout(table_text, font=font, font_bold=font_bold, padding_x=12, padding_y=8, grid=1, title=None, header_max_width=None, header_extra=0)
@@ -197,7 +205,7 @@ def test_row_background_and_text_colors():
     img = Image.open(io.BytesIO(png)).convert('RGB')
 
     # Use internal measurement functions to locate a data cell center
-    table_text, _ = _build_table_text(player_labels, rows, transpose=True)
+    table_text, _ = _build_table_text(player_labels, rows)
     # Measure layout using the same font size that the renderer uses by default
     font, font_bold = _load_fonts(25)
     col_widths, row_height, title_h, _, _ = _measure_layout(
@@ -262,6 +270,7 @@ def test_row_background_and_text_colors():
     )
 
     assert found_dark, "Expected to find dark (black) title pixels near top-left"
+
 
 def test_parse_service_returns_png_without_running_cli(monkeypatch: pytest.MonkeyPatch):
     """Smoke test: patch CLI parse to use existing sample output files."""
@@ -375,7 +384,7 @@ def test_last_row_not_cut_off():
     _ = Image.open(io.BytesIO(png)).convert('RGB')
 
     # Recompute layout to find last row center
-    table_text, _ = _build_table_text(player_labels, rows, transpose=True)
+    table_text, _ = _build_table_text(player_labels, rows)
     font, font_bold = _load_fonts(25)
     _, row_height, title_h, _, img_h = _measure_layout(table_text, font=font, font_bold=font_bold, padding_x=14, padding_y=10, grid=1, title='Clip Test', header_extra=15)
 
@@ -411,6 +420,7 @@ def test_last_row_not_cut_off_with_team_header():
 
 
 def test_parse_service_raises_on_missing_artifacts(monkeypatch: pytest.MonkeyPatch):
+    """Raise a user-facing error when required artifacts are missing."""
     def fake_parse_replay_with_cli(_path: str, flags=None):
         return {"details": "./output-details.txt"}
 
@@ -429,7 +439,7 @@ def test_parse_replay_with_cli_writes_files(tmp_path: Path, monkeypatch: pytest.
             self.stdout = stdout
             self.stderr = stderr
 
-    def fake_run(cmd, capture_output: bool, text: bool):
+    def fake_run(cmd, **_kwargs):
         flag = cmd[3]
         return FakeRes(0, f"output for {flag}")
 
@@ -460,6 +470,7 @@ def test_fastapi_endpoint_returns_png_and_triggers_lifespan(monkeypatch: pytest.
 
 
 def test_fastapi_upload_endpoint_accepts_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Accept upload and return PNG bytes via the FastAPI endpoint."""
     # Create a small dummy replay file
     p = tmp_path / "test.StormReplay"
     p.write_text("fake", encoding="utf-8")
@@ -493,13 +504,14 @@ def test_font_size_affects_layout_or_skips_if_no_scalable_font():
 
 
 def test_parse_replay_with_cli_handles_nonzero_returncode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Skip artifacts for failing flags but keep successful ones."""
     class FakeRes:
         def __init__(self, returncode: int, stdout: str = "", stderr: str = ""):
             self.returncode = returncode
             self.stdout = stdout
             self.stderr = stderr
 
-    def fake_run(cmd, capture_output: bool, text: bool):
+    def fake_run(cmd, **_kwargs):
         flag = cmd[3]
         if flag == "--details":
             return FakeRes(1, stderr="boom")
@@ -514,6 +526,7 @@ def test_parse_replay_with_cli_handles_nonzero_returncode(tmp_path: Path, monkey
 
 
 def test_parse_replay_with_cli_handles_subprocess_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Return empty results when subprocess execution raises."""
     def fake_run(*args, **kwargs):
         raise RuntimeError("subprocess failed")
 
@@ -525,16 +538,19 @@ def test_parse_replay_with_cli_handles_subprocess_exception(tmp_path: Path, monk
 
 
 def test_extract_score_returns_zeros_when_stat_missing():
+    """Default missing score stats to all-zero values."""
     fake_event = {"m_instanceList": [{"m_name": b"SomethingElse", "m_values": []}]}
     row = extract_score(fake_event, "Deaths", player_count=10)
     assert row == [0] * 10
 
 
 def test_latest_value_empty_series():
+    """Return 0 when the instance series is empty."""
     assert _latest_value([]) == 0
 
 
 def test_parse_tracker_events_skips_bad_blocks(tmp_path: Path):
+    """Skip invalid blocks while parsing tracker event files."""
     content = "".join([
         "{\"a\": 1}",
         "\n\n",
@@ -551,6 +567,7 @@ def test_parse_tracker_events_skips_bad_blocks(tmp_path: Path):
 
 
 def test_load_output_file_decodes_utf8_and_fallback_to_latin1(tmp_path: Path):
+    """Decode output files with utf-8 and fall back gracefully."""
     p_utf8 = tmp_path / "a.txt"
     p_utf8.write_text("hello", encoding="utf-8")
     assert load_output_file(str(p_utf8)) == "hello"

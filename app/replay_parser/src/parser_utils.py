@@ -10,7 +10,7 @@ def load_output_file(path: str) -> str:
     with open(path, "rb") as fh:
         raw = fh.read()
 
-    for enc in ("utf-8", "utf-8-sig", "utf-16", "latin-1"):
+    for enc in ("utf-8", "utf-8-sig", "utf-16"):
         try:
             return raw.decode(enc)
         except Exception:

@@ -1,3 +1,5 @@
+"""Tests for Discord bot command and message handling."""
+
 from __future__ import annotations
 
 import asyncio
@@ -70,6 +72,7 @@ class _Attachment:
 
 
 def test_parse_command_removes_temp_file_on_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Remove temp replay file after successful parse command."""
     att = _Attachment(tmp_path, "example.StormReplay")
     ctx = _Ctx(att)  # type: ignore[arg-type]
 
@@ -90,6 +93,7 @@ def test_parse_command_removes_temp_file_on_success(monkeypatch: pytest.MonkeyPa
 
 
 def test_parse_command_reports_error_and_still_cleans(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Report parse errors while still cleaning temporary files."""
     att = _Attachment(tmp_path, "fail.StormReplay")
     ctx = _Ctx(att)  # type: ignore[arg-type]
 
@@ -107,7 +111,9 @@ def test_parse_command_reports_error_and_still_cleans(monkeypatch: pytest.Monkey
     assert not temp_file.exists()
     assert "Failed to parse replay" in ctx.sent[0][0][0]
 
+
 def test_bot_mention_triggers_reaction_and_processing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """React and process attachments when the bot is mentioned."""
     att = _Attachment(tmp_path, "mention.StormReplay")
 
     class Channel:
@@ -154,6 +160,7 @@ def test_bot_mention_triggers_reaction_and_processing(monkeypatch: pytest.Monkey
 
 
 def test_missing_permissions_falls_back_to_dm(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Fall back to DM when channel send is forbidden."""
     att = _Attachment(tmp_path, "no_perms.StormReplay")
 
     sent_to_author = []
@@ -197,6 +204,7 @@ def test_missing_permissions_falls_back_to_dm(monkeypatch: pytest.MonkeyPatch, t
 
 
 def test_delete_message_if_bot_success(monkeypatch: pytest.MonkeyPatch):
+    """Delete messages authored by the bot when possible."""
     deleted = {}
     # bot.user is a read-only property; set internal _connection.user for testing
     monkeypatch.setattr(discord_module.bot, "_connection", SimpleNamespace(user=SimpleNamespace(id=9999)), raising=False)
@@ -221,6 +229,7 @@ def test_delete_message_if_bot_success(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_delete_message_if_bot_denies_when_not_bot(monkeypatch: pytest.MonkeyPatch):
+    """Refuse deletion when the message is not authored by the bot."""
     called = {}
     # bot.user is a read-only property; set internal _connection.user for testing
     monkeypatch.setattr(discord_module.bot, "_connection", SimpleNamespace(user=SimpleNamespace(id=9999)), raising=False)
@@ -245,6 +254,7 @@ def test_delete_message_if_bot_denies_when_not_bot(monkeypatch: pytest.MonkeyPat
 
 
 def test_bot_mention_ignored_when_no_attachment(monkeypatch: pytest.MonkeyPatch):
+    """Ignore bot mentions that have no replay attachment."""
     class Message:
         def __init__(self):
             self.attachments = []
@@ -261,6 +271,7 @@ def test_bot_mention_ignored_when_no_attachment(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_process_message_attachment_reports_missing_attachment(monkeypatch: pytest.MonkeyPatch):
+    """Report a helpful message when no attachment is present."""
     sent: list[str] = []
 
     class Channel:
@@ -280,6 +291,7 @@ def test_process_message_attachment_reports_missing_attachment(monkeypatch: pyte
 
 
 def test_send_png_uses_channel_send_when_send_fn_none(monkeypatch: pytest.MonkeyPatch):
+    """Send PNG to the channel when no explicit send function is provided."""
     sent = {}
 
     class Channel:
@@ -296,6 +308,7 @@ def test_send_png_uses_channel_send_when_send_fn_none(monkeypatch: pytest.Monkey
 
 
 def test_on_ready_sync_success(monkeypatch: pytest.MonkeyPatch):
+    """Sync application commands on ready."""
     called = {"n": 0}
 
     async def sync():
@@ -308,6 +321,7 @@ def test_on_ready_sync_success(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_on_ready_sync_failure_is_caught(monkeypatch: pytest.MonkeyPatch):
+    """Swallow sync failures in on_ready."""
     async def sync():
         await asyncio.sleep(0)
         raise RuntimeError("boom")
@@ -318,6 +332,7 @@ def test_on_ready_sync_failure_is_caught(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_delete_message_context_responder_paths(monkeypatch: pytest.MonkeyPatch):
+    """Use response or followup depending on interaction state."""
     called: list[tuple[str, bool]] = []
 
     async def fake_delete(_message, respond_fn=None):
@@ -358,12 +373,14 @@ def test_delete_message_context_responder_paths(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_main_raises_when_token_missing(monkeypatch: pytest.MonkeyPatch):
+    """Raise when the Discord token is missing."""
     monkeypatch.setattr(discord_module, "TOKEN", "")
     with pytest.raises(RuntimeError):
         discord_module.main()
 
 
 def test_delete_message_if_bot_denies_when_bot_not_ready(monkeypatch: pytest.MonkeyPatch):
+    """Refuse deletion when bot.user is not ready."""
     # Simulate bot.user not being ready.
     monkeypatch.setattr(discord_module.bot, "_connection", SimpleNamespace(user=None), raising=False)
 
@@ -385,6 +402,7 @@ def test_delete_message_if_bot_denies_when_bot_not_ready(monkeypatch: pytest.Mon
 
 
 def test_process_message_attachment_handles_post_exception_and_file_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Handle missing file and post failures gracefully."""
     sent: list[str] = []
 
     class Channel:
@@ -412,6 +430,7 @@ def test_process_message_attachment_handles_post_exception_and_file_missing(monk
 
 
 def test_process_message_attachment_logs_unlink_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Ignore unlink failures during attachment cleanup."""
     class Attachment:
         filename = "unlink.StormReplay"
 
@@ -445,6 +464,7 @@ def test_process_message_attachment_logs_unlink_failure(monkeypatch: pytest.Monk
 
 
 def test_send_text_forbidden_add_reaction_and_dm_failures(monkeypatch: pytest.MonkeyPatch):
+    """Avoid raising when channel send, reactions, and DM all fail."""
     class Channel:
         async def send(self, _content: str):
             await asyncio.sleep(0)
@@ -468,9 +488,11 @@ def test_send_text_forbidden_add_reaction_and_dm_failures(monkeypatch: pytest.Mo
 
 
 def test_on_message_early_return_when_author_is_bot(monkeypatch: pytest.MonkeyPatch):
+    """Ignore messages authored by the bot itself."""
     called = {"n": 0}
 
     async def process_commands(_message):
+        await asyncio.sleep(0)
         called["n"] += 1
 
     monkeypatch.setattr(discord_module.bot, "process_commands", process_commands)
@@ -483,6 +505,7 @@ def test_on_message_early_return_when_author_is_bot(monkeypatch: pytest.MonkeyPa
 
 
 def test_on_message_processes_commands_when_content_present(monkeypatch: pytest.MonkeyPatch):
+    """Process commands for non-mention messages with content."""
     called = {"n": 0}
 
     async def process_commands(_message):
@@ -502,6 +525,7 @@ def test_on_message_processes_commands_when_content_present(monkeypatch: pytest.
 
 
 def test_on_message_reaction_failure_is_ignored(monkeypatch: pytest.MonkeyPatch):
+    """Ignore reaction failures when handling mentions."""
     async def process_commands(_message):
         await asyncio.sleep(0)
 
@@ -529,6 +553,7 @@ def test_on_message_reaction_failure_is_ignored(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_delete_message_context_exception_is_caught(monkeypatch: pytest.MonkeyPatch):
+    """Catch exceptions from delete handlers invoked by interaction callbacks."""
     async def fake_delete(_message, respond_fn=None):
         raise RuntimeError("boom")
 
@@ -550,6 +575,7 @@ def test_delete_message_context_exception_is_caught(monkeypatch: pytest.MonkeyPa
 
 
 def test_main_runs_bot_when_token_present(monkeypatch: pytest.MonkeyPatch):
+    """Run the bot when a token is configured."""
     called = {"token": None}
 
     monkeypatch.setattr(discord_module, "TOKEN", "token")

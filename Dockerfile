@@ -28,7 +28,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/venv/bin:$PATH"
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends fonts-dejavu-core libjpeg62-turbo zlib1g \
+    && apt-get install -y --no-install-recommends fonts-dejavu-core fonts-noto-cjk libjpeg62-turbo zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /venv /venv

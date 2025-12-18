@@ -16,8 +16,28 @@ DEFAULT_TEAM_RED_NAME = "TEAM RED"
 TEAM_BLUE_RGB = (80, 160, 255)
 TEAM_RED_RGB = (255, 110, 110)
 
+TEAM_BLUE_CELL_RGBA = (*TEAM_BLUE_RGB, 70)
+TEAM_RED_CELL_RGBA = (*TEAM_RED_RGB, 70)
+HIGHLIGHT_GOLD_RGB = (255, 215, 0)
+
 BACKGROUND_IMAGE_RELATIVE_PATH = Path("data") / "images" / "HotS_background.jpg"
 
+HIGHLIGHT_KEYWORDS = (
+        "kill",
+        "assist",
+        "death",
+        "damage",
+        "healing",
+        "protection",
+        "experience",
+        "time ",
+        "streak",
+        "multikill",
+        "escape",
+        "vengeance",
+        "heals",
+        "dead"
+    )
 
 @dataclass(frozen=True)
 class RenderLayoutOptions:
@@ -54,13 +74,40 @@ class _TableDrawContext:
     padding_x: int
     padding_y: int
     grid: int
-    transpose: bool
 
 
 @dataclass(frozen=True)
 class _PlayerCellRenderOptions:
     hero_names: Sequence[str] | None
     hero_portraits: Sequence[Image.Image | None] | None
+
+@dataclass(frozen=True)
+class TeamHeaderLayout:
+    team_blue_name: str
+    team_red_name: str
+    team_blue_level: int | None
+    team_red_level: int | None
+    team_blue_kills: int | None
+    team_red_kills: int | None
+    game_time_seconds: int | None
+    title_height: int
+    header_top: int
+    left_x: int
+    right_x: int
+    center_x: int
+    blue_text_left_x: int
+    red_text_left_x: int
+    blue_kills_left_x: int
+    red_kills_left_x: int
+    name_top_y: int
+    level_top_y: int
+    game_label_center_y: int
+    time_center_y: int
+    team_font_bold: Font
+    level_font_bold: Font
+    game_label_font_bold: Font
+    time_font_bold: Font
+    team_font_size: int
 
 
 def _format_cell(value: CellValue) -> str:
@@ -171,6 +218,7 @@ def _max_text_height_in_cols(
     font: Font,
     font_bold: Font,
 ) -> int:
+    """Return the maximum multiline text height across the given columns."""
     max_h = 0
     for r in range(len(table_text)):
         f = font_bold if r == 0 else font
@@ -189,6 +237,7 @@ def _widen_columns_for_large_font(
     font_bold: Font,
     padding_x: int,
 ) -> None:
+    """Increase column widths so all text fits using the given fonts."""
     for c in cols:
         for r in range(len(table_text)):
             f = font_bold if r == 0 else font
@@ -255,14 +304,33 @@ def _apply_talent_sizing(
 def _load_fonts(font_size: int) -> tuple[Font, Font]:
     """Load a font and bold font (TTF preferred, else Pillow default)."""
     candidates: list[tuple[str, str]] = [
+        ("NotoSansCJK-Regular.ttc", "NotoSansCJK-Bold.ttc"),
+        ("NotoSansCJKjp-Regular.otf", "NotoSansCJKjp-Bold.otf"),
         ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf"),
         ("arial.ttf", "arialbd.ttf"),
     ]
+    font_dirs = [
+        Path("/usr/share/fonts"),
+        Path("/usr/local/share/fonts"),
+        Path("C:/Windows/Fonts"),
+    ]
+
+    def _try_load(name_or_path: str, size: int) -> Font:
+        """Load a truetype font by name or by searching known font dirs."""
+        try:
+            return ImageFont.truetype(name_or_path, size)
+        except Exception:
+            for d in font_dirs:
+                p = d / name_or_path
+                if p.exists():
+                    return ImageFont.truetype(str(p), size)
+            raise
+
     for regular_name, bold_name in candidates:
         try:
-            font = ImageFont.truetype(regular_name, font_size)
+            font = _try_load(regular_name, font_size)
             try:
-                font_bold = ImageFont.truetype(bold_name, font_size)
+                font_bold = _try_load(bold_name, font_size)
             except Exception:
                 font_bold = font
             return font, font_bold
@@ -275,42 +343,26 @@ def _load_fonts(font_size: int) -> tuple[Font, Font]:
 
 def _build_table_text(
     player_labels: Sequence[str],
-    rows: Sequence[Tuple[str, Sequence[CellValue]]],
-    *,
-    transpose: bool = False,
-) -> tuple[List[List[str]], List[List[bool]]]:
+    rows: Sequence[Tuple[str, Sequence[CellValue]]]) -> tuple[List[List[str]], List[List[bool]]]:
     """Build table strings plus a numeric mask for alignment."""
     table_text: List[List[str]] = []
     table_is_numeric: List[List[bool]] = []
+    
+    categories = [category for category, _ in rows]
+    header = ["Player", *categories]
+    table_text.append(header)
+    table_is_numeric.append([False] * len(header))
 
-    if not transpose:
-        header = ["Category", *list(player_labels)]
-        table_text.append(header)
-        table_is_numeric.append([False] * len(header))
-        for category, values in rows:
-            row_vals = [category]
-            row_mask = [False]
-            for v in values:
-                row_vals.append(_format_cell(v))
-                row_mask.append(_is_numeric(v))
-            table_text.append(row_vals)
-            table_is_numeric.append(row_mask)
-    else:
-        categories = [category for category, _ in rows]
-        header = ["Player", *categories]
-        table_text.append(header)
-        table_is_numeric.append([False] * len(header))
-
-        # Number of players assumed to match the length of values in rows
-        for i, player in enumerate(player_labels):
-            row_vals = [player]
-            row_mask = [False]
-            for (_cat, values) in rows:
-                v = values[i]
-                row_vals.append(_format_cell(v))
-                row_mask.append(_is_numeric(v))
-            table_text.append(row_vals)
-            table_is_numeric.append(row_mask)
+    # Number of players assumed to match the length of values in rows
+    for i, player in enumerate(player_labels):
+        row_vals = [player]
+        row_mask = [False]
+        for (_cat, values) in rows:
+            v = values[i]
+            row_vals.append(_format_cell(v))
+            row_mask.append(_is_numeric(v))
+        table_text.append(row_vals)
+        table_is_numeric.append(row_mask)
 
     return table_text, table_is_numeric
 
@@ -323,35 +375,6 @@ def _text_h(draw: ImageDraw.ImageDraw, font: Font, s: str = "Ag") -> int:
     """Measure multiline text height."""
     bbox = draw.multiline_textbbox((0, 0), s, font=font)
     return int(bbox[3] - bbox[1])
-
-
-@dataclass(frozen=True)
-class TeamHeaderLayout:
-    team_blue_name: str
-    team_red_name: str
-    team_blue_level: int | None
-    team_red_level: int | None
-    team_blue_kills: int | None
-    team_red_kills: int | None
-    game_time_seconds: int | None
-    title_height: int
-    header_top: int
-    left_x: int
-    right_x: int
-    center_x: int
-    blue_text_left_x: int
-    red_text_left_x: int
-    blue_kills_left_x: int
-    red_kills_left_x: int
-    name_top_y: int
-    level_top_y: int
-    game_label_center_y: int
-    time_center_y: int
-    team_font_bold: Font
-    level_font_bold: Font
-    game_label_font_bold: Font
-    time_font_bold: Font
-    team_font_size: int
 
 def _measure_layout(
     table_text: List[List[str]],
@@ -721,14 +744,17 @@ def _draw_team_header(
         )
 
     if layout.team_blue_level is not None:
-        prefix_w = _text_w(draw, layout.level_font_bold, "Level ")
+        level_text = f"Level {layout.team_blue_level}"
         if layout.team_blue_kills is not None:
-            level_x = max(0, int(layout.blue_kills_left_x - prefix_w))
+            kills_w = _text_w(draw, layout.team_font_bold, str(layout.team_blue_kills))
+            kills_right_x = layout.blue_kills_left_x + kills_w
+            level_w = _text_w(draw, layout.level_font_bold, level_text)
+            level_x = max(0, int(kills_right_x - level_w))
         else:
             level_x = layout.blue_text_left_x
         draw.text(
             (level_x, layout.level_top_y),
-            f"Level {layout.team_blue_level}",
+            level_text,
             font=layout.level_font_bold,
             anchor="lt",
             fill=TEAM_BLUE_RGB,
@@ -793,6 +819,19 @@ def _draw_table(
         row_count=len(table_text),
         col_widths=ctx.col_widths,
     )
+
+    highlight_cells = _compute_best_cells(table_text=table_text, table_is_numeric=table_is_numeric, ctx=ctx)
+    comp_rgba = comp.convert("RGBA")
+    overlay = Image.new("RGBA", comp_rgba.size, (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    _draw_team_cell_backgrounds(
+        od,
+        table_text=table_text,
+        ctx=ctx,
+        highlight_cells=highlight_cells,
+    )
+    comp = Image.alpha_composite(comp_rgba, overlay).convert("RGB")
+
     draw = ImageDraw.Draw(comp)
     _draw_grid(
         draw,
@@ -817,7 +856,236 @@ def _draw_table(
     img.paste(comp)
 
 
+def _parse_number(text: str) -> float | None:
+    """Parse a formatted numeric cell back into a number."""
+    s = text.strip().replace(",", "")
+    if not s:
+        return None
+    try:
+        return float(int(s))
+    except Exception:
+        try:
+            return float(s)
+        except Exception:
+            return None
+
+
+def _is_highlightable_stat(label: str) -> bool:
+    """Return True if a stat label is reasonable to highlight."""
+    s = label.strip().lower()
+
+    return any(k in s for k in HIGHLIGHT_KEYWORDS)
+
+
+def _prefers_lower_value(label: str) -> bool:
+    """Return True if lower values are better for this stat."""
+    s = label.strip().lower()
+    return any(k in s for k in ("death", "time spent dead", "time dead", "damage taken"))
+
+
+def _team_split_count(player_count: int) -> int:
+    """Return the blue team size for a given player count."""
+    return min(max(1, player_count // 2), player_count)
+
+
+def _best_value(values: Sequence[float], *, prefer_low: bool) -> float:
+    """Return the best value from a list under the chosen direction."""
+    best_value = min(values) if prefer_low else max(values)
+    if values.count(best_value) < 3:
+        return best_value
+    else:
+        return -1
+
+
+def _collect_numeric_values_by_row(
+    *,
+    col_index: int,
+    rows: range,
+    table_text: Sequence[Sequence[str]],
+    table_is_numeric: Sequence[Sequence[bool]],
+    row_count: int,
+) -> list[tuple[float, int]]:
+    """Collect parsed numeric values for a column, along with their row index."""
+    values: list[tuple[float, int]] = []
+    for r in rows:
+        if r >= row_count or r >= len(table_is_numeric) or col_index >= len(table_is_numeric[r]):
+            continue
+        if not table_is_numeric[r][col_index]:
+            continue
+        v = _parse_number(table_text[r][col_index])
+        if v is None:
+            continue
+        values.append((v, r))
+    return values
+
+
+def _highlight_best_positions(values: Sequence[tuple[float, int]], *, prefer_low: bool) -> set[int]:
+    """Return indices of positions whose value equals the best in the group."""
+    if not values:
+        return set()
+    best = _best_value([v for v, _ in values], prefer_low=prefer_low)
+    return {pos for v, pos in values if v == best}
+
+def _best_rows_in_col(
+    *,
+    col_index: int,
+    rows: range,
+    table_text: Sequence[Sequence[str]],
+    table_is_numeric: Sequence[Sequence[bool]],
+    row_count: int,
+    prefer_low: bool,
+) -> set[int]:
+    """Return row indices of best values for one column and team range."""
+    values = _collect_numeric_values_by_row(
+        col_index=col_index,
+        rows=rows,
+        table_text=table_text,
+        table_is_numeric=table_is_numeric,
+        row_count=row_count,
+    )
+    return _highlight_best_positions(values, prefer_low=prefer_low)
+
+
+def _compute_best_value_cells(
+    *,
+    table_text: Sequence[Sequence[str]],
+    table_is_numeric: Sequence[Sequence[bool]],
+    ctx: _TableDrawContext,
+) -> set[tuple[int, int]]:
+    """Compute best-value cells for the transposed layout."""
+    col_count = len(ctx.col_widths)
+    row_count = len(table_text)
+    player_count = max(0, row_count - 1)
+    player_rows = range(1, 1 + player_count)
+
+    highlighted: set[tuple[int, int]] = set()
+    for c in range(1, col_count):
+        label = table_text[0][c] if c < len(table_text[0]) else ""
+        if not _is_highlightable_stat(label):
+            continue
+        prefer_low = _prefers_lower_value(label)
+
+        for r in _best_rows_in_col(
+            col_index=c,
+            rows=player_rows,
+            table_text=table_text,
+            table_is_numeric=table_is_numeric,
+            row_count=row_count,
+            prefer_low=prefer_low,
+        ):
+            highlighted.add((r, c))
+
+    return highlighted
+
+
+def _compute_best_cells(
+    *,
+    table_text: Sequence[Sequence[str]],
+    table_is_numeric: Sequence[Sequence[bool]],
+    ctx: _TableDrawContext,
+) -> set[tuple[int, int]]:
+    """Return (r, c) cells to highlight as best-in-team."""
+    col_count = len(ctx.col_widths)
+    row_count = len(table_text)
+    if row_count == 0 or col_count == 0:
+        return set()
+
+    return _compute_best_value_cells(table_text=table_text, table_is_numeric=table_is_numeric, ctx=ctx)
+    
+
+def _cell_team_fill(*, r: int, c: int, row_count: int) -> tuple[int, int, int, int] | None:
+    """Return the RGBA fill for a team cell, or None if not applicable."""
+    if r <= 0 or c <= 0:
+        return None
+
+    player_count = max(0, row_count - 1)
+    blue_end_r = 1 + _team_split_count(player_count)
+    return TEAM_BLUE_CELL_RGBA if r < blue_end_r else TEAM_RED_CELL_RGBA
+
+
+def _draw_inner_glow(
+    draw: ImageDraw.ImageDraw,
+    *,
+    bbox: tuple[int, int, int, int],
+    rgb: tuple[int, int, int],
+    max_alpha: int = 140,
+    steps: int = 7,
+) -> None:
+    """Draw a soft inner border using inset rectangles."""
+    x0, y0, x1, y1 = bbox
+    for i in range(max(1, steps)):
+        a = int(max_alpha * (1.0 - (i / max(1, steps - 1))))
+        if a <= 0:
+            continue
+        draw.rectangle((x0 + i, y0 + i, x1 - i, y1 - i), outline=(*rgb, a), width=1)
+
+
+def _draw_team_cell_backgrounds(
+    draw: ImageDraw.ImageDraw,
+    *,
+    table_text: Sequence[Sequence[str]],
+    ctx: _TableDrawContext,
+    highlight_cells: set[tuple[int, int]],
+) -> None:
+    """Fill team cells and highlight best values."""
+    col_count = len(ctx.col_widths)
+    row_count = len(table_text)
+    if row_count == 0 or col_count == 0:
+        return
+
+    y = ctx.start_y
+    for r in range(row_count):
+        _draw_team_cell_background_row(
+            draw,
+            r=r,
+            y=y,
+            ctx=ctx,
+            highlight_cells=highlight_cells,
+            col_count=col_count,
+            row_count=row_count,
+        )
+        y += ctx.row_height + ctx.grid
+
+
+def _draw_team_cell_background_row(
+    draw: ImageDraw.ImageDraw,
+    *,
+    r: int,
+    y: int,
+    ctx: _TableDrawContext,
+    highlight_cells: set[tuple[int, int]],
+    col_count: int,
+    row_count: int,
+) -> None:
+    """Draw team cell backgrounds for a single row."""
+    if r <= 0 or col_count <= 1:
+        return
+
+    x = ctx.start_x + ctx.col_widths[0] + ctx.grid
+    for c in range(1, col_count):
+        cell_w = ctx.col_widths[c]
+        cell_x0 = x + ctx.grid
+        cell_y0 = y + ctx.grid
+        cell_x1 = cell_x0 + cell_w - 1
+        cell_y1 = cell_y0 + ctx.row_height - 1
+
+        fill = _cell_team_fill(r=r, c=c, row_count=row_count)
+        if fill is not None:
+            draw.rectangle((cell_x0, cell_y0, cell_x1, cell_y1), fill=fill)
+
+        if (r, c) in highlight_cells:
+            inset = max(1, ctx.grid)
+            _draw_inner_glow(
+                draw,
+                bbox=(cell_x0 + inset, cell_y0 + inset, cell_x1 - inset, cell_y1 - inset),
+                rgb=HIGHLIGHT_GOLD_RGB,
+            )
+
+        x += cell_w + ctx.grid
+
+
 def _font_for_cell(*, r: int, c: int, font: Font, font_bold: Font, talent: TalentRenderOptions | None) -> Font:
+    """Return the font to use for a specific table cell."""
     if talent is not None and c in talent.cols:
         return talent.font_bold if r == 0 else talent.font
     return font_bold if r == 0 else font
@@ -846,6 +1114,7 @@ def _draw_row_bands(
     od = ImageDraw.Draw(overlay)
 
     def band_bbox(top_row: int, bottom_row: int) -> tuple[int, int, int, int]:
+        """Return the pixel bbox for a row band inclusive of the inner grid."""
         x0 = start_x + grid
         x1 = start_x + table_w - grid
         y0 = start_y + top_row * (row_height + grid) + grid
@@ -969,6 +1238,7 @@ def _draw_default_cell_text(
     font_bold: Font,
     talent: TalentRenderOptions | None,
 ) -> None:
+    """Draw centered cell text (bold header row)."""
     f = _font_for_cell(r=r, c=c, font=font, font_bold=font_bold, talent=talent)
 
     text_x = cell_x0 + (cell_w // 2)
@@ -1000,7 +1270,8 @@ def _maybe_draw_player_cell(
     font_bold: Font,
     player: _PlayerCellRenderOptions,
 ) -> bool:
-    if not (ctx.transpose and c == 0 and r > 0 and player.hero_names is not None):
+    """Draw the Player column cell (name/hero/portrait) when enabled."""
+    if not (c == 0 and r > 0 and player.hero_names is not None):
         return False
 
     player_index = r - 1
@@ -1030,6 +1301,7 @@ def _maybe_draw_player_cell(
 
 
 def _ellipsize(draw: ImageDraw.ImageDraw, *, font: Font, text: str, max_width: int) -> str:
+    """Truncate text to fit in max_width by adding an ellipsis."""
     if max_width <= 0:
         return ""
     if _text_w(draw, font, text) <= max_width:
@@ -1041,6 +1313,53 @@ def _ellipsize(draw: ImageDraw.ImageDraw, *, font: Font, text: str, max_width: i
     while s and _text_w(draw, font, s + ell) > max_width:
         s = s[:-1]
     return s + ell if s else ""
+
+
+def _resize_square_image(img: Image.Image, *, size: int) -> Image.Image | None:
+    """Resize image to a square, returning None if it fails."""
+    if size <= 0:
+        return None
+    try:
+        return img.resize((size, size), resample=Image.Resampling.LANCZOS)
+    except Exception:
+        try:
+            return img.resize((size, size))
+        except Exception:
+            return None
+
+
+def _prepare_player_portrait(
+    portrait: Image.Image, *, inner_h: int, inner_w: int, padding_y: int
+) -> tuple[Image.Image | None, int]:
+    """Return a resized portrait and its square size."""
+    max_h = max(1, inner_h - padding_y * 2)
+    max_w = max(1, inner_w // 2)
+    img_size = max(1, min(max_h, max_w))
+
+    portrait_resized = _resize_square_image(portrait, size=img_size)
+    if portrait_resized is None:
+        return None, 0
+    return portrait_resized, img_size
+
+
+def _paste_portrait_and_get_text_left(
+    *,
+    img: Image.Image,
+    portrait_resized: Image.Image,
+    cell_x0: int,
+    cell_y0: int,
+    inner_h: int,
+    img_size: int,
+    padding_x: int,
+) -> int:
+    """Paste portrait if possible and return text left x-coordinate."""
+    img_x = cell_x0 + padding_x
+    img_y = cell_y0 + (inner_h - img_size) // 2
+    try:
+        img.paste(portrait_resized, (img_x, img_y), portrait_resized)
+    except Exception:
+        pass
+    return img_x + img_size + padding_x
 
 
 def _draw_player_cell(
@@ -1059,41 +1378,25 @@ def _draw_player_cell(
     font: Font,
     font_bold: Font,
 ) -> None:
+    """Draw the Player cell with optional hero portrait and two-line text."""
     inner_h = max(1, row_h)
     inner_w = max(1, cell_w)
 
-    img_size = 0
+    text_left_x = cell_x0 + padding_x
     if portrait is not None:
-        max_h = max(1, inner_h - padding_y * 2)
-        # Larger portraits: previous constraint was ~1/3 of the cell width.
-        # Using ~1/2 gives a +50% size increase when width is the limiting factor.
-        max_w = max(1, inner_w // 2)
-        img_size = max(1, min(max_h, max_w))
-
-        portrait_resized: Image.Image | None
-        try:
-            portrait_resized = portrait.resize((img_size, img_size), resample=Image.Resampling.LANCZOS)
-        except Exception:
-            try:
-                portrait_resized = portrait
-                img_size = min(portrait_resized.size[0], portrait_resized.size[1], img_size)
-                portrait_resized = portrait_resized.resize((img_size, img_size))
-            except Exception:
-                portrait_resized = None
-                img_size = 0
-
+        portrait_resized, img_size = _prepare_player_portrait(
+            portrait, inner_h=inner_h, inner_w=inner_w, padding_y=padding_y
+        )
         if portrait_resized is not None and img_size > 0:
-            img_x = cell_x0 + padding_x
-            img_y = cell_y0 + (inner_h - img_size) // 2
-            try:
-                img.paste(portrait_resized, (img_x, img_y), portrait_resized)
-            except Exception:
-                pass
-            text_left_x = img_x + img_size + padding_x
-        else:
-            text_left_x = cell_x0 + padding_x
-    else:
-        text_left_x = cell_x0 + padding_x
+            text_left_x = _paste_portrait_and_get_text_left(
+                img=img,
+                portrait_resized=portrait_resized,
+                cell_x0=cell_x0,
+                cell_y0=cell_y0,
+                inner_h=inner_h,
+                img_size=img_size,
+                padding_x=padding_x,
+            )
 
     text_right_x = cell_x0 + inner_w - padding_x
     available_w = max(1, text_right_x - text_left_x)
@@ -1134,7 +1437,6 @@ def render_stats_store_to_png(
     rows: Sequence[Tuple[str, Sequence[CellValue]]],
     *,
     title: str | None = None,
-    transpose: bool = True,
     header_max_width: int | None = None,
     header_extra: int = 15,
     layout: RenderLayoutOptions | None = None,
@@ -1149,7 +1451,7 @@ def render_stats_store_to_png(
     padding_y = layout.padding_y
     grid = layout.grid
 
-    table_text, table_is_numeric = _build_table_text(player_labels, rows, transpose=transpose)
+    table_text, table_is_numeric = _build_table_text(player_labels, rows)
     font, font_bold = _load_fonts(font_size)
 
     player_hero_portraits = _load_player_hero_portraits(player_hero_portrait_paths)
@@ -1189,7 +1491,7 @@ def render_stats_store_to_png(
     )
 
     # Ensure the Player column is wide enough for: portrait + player name + hero name.
-    if transpose and player_hero_names:
+    if player_hero_names:
         dummy = Image.new("RGB", (1, 1), "white")
         d = ImageDraw.Draw(dummy)
 
@@ -1203,7 +1505,6 @@ def render_stats_store_to_png(
         row_height = max(row_height, int(needed_row_h))
 
         # Portrait size is chosen inside _draw_player_cell as min(cell_h - padding, cell_w//2).
-        # For width planning, assume a portrait roughly up to the row height.
         planned_portrait = max(1, min(row_height - padding_y * 2, 220))
 
         max_player_w = max((_text_w(d, font_bold, s) for s in player_labels), default=0)
@@ -1264,7 +1565,6 @@ def render_stats_store_to_png(
         padding_x=padding_x,
         padding_y=padding_y,
         grid=grid,
-        transpose=transpose,
     )
     player_opts = _PlayerCellRenderOptions(hero_names=player_hero_names, hero_portraits=player_hero_portraits)
     _draw_table(
@@ -1292,6 +1592,7 @@ def render_stats_store_to_png(
 def _load_player_hero_portraits(
     player_hero_portrait_paths: Sequence[Path | None] | None,
 ) -> list[Image.Image | None] | None:
+    """Load and convert player hero portraits to RGBA, keeping failures as None."""
     if player_hero_portrait_paths is None:
         return None
 
@@ -1319,6 +1620,7 @@ def _measure_table_layout(
     header_max_width: int | None,
     header_extra: int,
 ) -> tuple[List[int], int, int, int, int]:
+    """Measure/adjust table geometry, including optional header wrapping."""
     # Initial measurement without forcing header wrapping
     col_widths, row_height, title_h, img_w, img_h = _measure_layout(
         table_text,

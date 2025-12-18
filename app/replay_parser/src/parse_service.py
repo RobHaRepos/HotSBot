@@ -17,18 +17,38 @@ logger = logging.getLogger(__name__)
 
 OUTPUT_DIR = Path(__file__).resolve().parents[2] / "output_replays"
 
+DEFAULT_CLI_FLAGS = ["--header", "--details", "--gameevents", "--trackerevents"]
+TEAM_LEVEL_CATEGORY = "Team Level Achieved"
+TEAM_KILLS_CATEGORY = "Team Deaths"
+
+REMOVED_TABLE_CATEGORIES = {
+    "Hero",
+    "Creep Damage Done",
+    "Game Score",
+    "Less Than 4 Deaths",
+    TEAM_LEVEL_CATEGORY,
+    "Team Deaths",
+    "Multikills",
+}
+
 
 def parse_replay_with_cli(path: str, flags: list[str] | None = None) -> dict[str, str]:
     """Run heroprotocol CLI to extract artifacts and return their file paths."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    flags = flags or ["--header", "--details", "--gameevents", "--trackerevents"]
+    flags = flags or list(DEFAULT_CLI_FLAGS)
 
     results: dict[str, str] = {}
     try:
         for flag in flags:
             cmd = [sys.executable, "-m", "heroprotocol", flag, path]
-            res = subprocess.run(cmd, capture_output=True, text=True)
+            res = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
             if res.returncode != 0:
                 logger.error("heroprotocol failed (flag=%s): %s", flag, res.stderr.strip())
                 continue
@@ -45,6 +65,7 @@ def parse_replay_with_cli(path: str, flags: list[str] | None = None) -> dict[str
 
 
 def _cleanup_paths(paths: Iterable[Path]) -> None:
+    """Best-effort delete of generated artifact files."""
     for artifact_path in paths:
         try:
             artifact_path.unlink()
@@ -68,9 +89,9 @@ def parse_and_build_table(replay: str) -> bytes:
 
         header = extract_header_from_file(header_path)
         table_header = extract_details_from_file(details_path, game_header=header)
-        
+
         player_labels = [(player.name or "") for player in table_header.players]
-        
+
         store = InMemoryStatsStore(player_labels=player_labels)
 
         hero_names = [(player.hero or "") for player in table_header.players]
@@ -82,10 +103,30 @@ def parse_and_build_table(replay: str) -> bytes:
             store=store,
         )
 
+        # Keep team kills in the header, but remove the Team Deaths column from the table.
+        team_blue_kills = None
+        team_red_kills = None
+        team_kills_row = store.get_row(TEAM_KILLS_CATEGORY)
+        if team_kills_row:
+            try:
+                values_int = [int(v) for v in team_kills_row]
+                if len(values_int) >= 6:
+                    # Matches the renderer's derivation logic (keeps blue/red consistent with prior behavior).
+                    team_red_kills = values_int[0]
+                    team_blue_kills = values_int[5]
+                else:
+                    half = max(1, len(player_labels) // 2)
+                    padded = values_int + [0] * max(0, len(player_labels) - len(values_int))
+                    team_blue_kills = sum(padded[:half])
+                    team_red_kills = sum(padded[half:])
+            except Exception:
+                team_blue_kills = None
+                team_red_kills = None
+
         # Keep team levels in the header, but remove the Team Level Achieved column from the table.
         team_blue_level = None
         team_red_level = None
-        team_level_row = store.get_row("Team Level Achieved")
+        team_level_row = store.get_row(TEAM_LEVEL_CATEGORY)
         if team_level_row:
             half = max(1, len(player_labels) // 2)
             try:
@@ -97,15 +138,11 @@ def parse_and_build_table(replay: str) -> bytes:
                 team_blue_level = None
                 team_red_level = None
 
-        removed_categories = {
-            "Hero",
-            "Creep Damage Done",
-            "Game Score",
-            "Team Level Achieved",
-            "Multikills",
-        }
-
-        rows = [(row.category, row.values) for row in store.iter_rows() if row.category not in removed_categories]
+        rows = [
+            (row.category, row.values)
+            for row in store.iter_rows()
+            if row.category not in REMOVED_TABLE_CATEGORIES
+        ]
 
         hero_portrait_paths = [get_or_download_hero_image_path(h) for h in hero_names]
 
@@ -120,6 +157,8 @@ def parse_and_build_table(replay: str) -> bytes:
                 team_red_name="TEAM RED",
                 team_blue_level=team_blue_level,
                 team_red_level=team_red_level,
+                team_blue_kills=team_blue_kills,
+                team_red_kills=team_red_kills,
                 game_time_seconds=getattr(header, "elapsed_seconds", None),
             ),
         )

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from collections.abc import Iterator, Sequence
+from typing import cast
 
 Value = int | str
 
@@ -14,18 +15,22 @@ class InMemoryStatsStore:
     """Simple per-run in-memory stats table (category -> 10 player values)."""
 
     def __init__(self, player_labels: Sequence[str]):
+        """Create a new store for the given player labels."""
         self._player_labels: list[str] = list(player_labels)
         self._rows: dict[str, list[Value]] = {}
 
     @property
     def player_count(self) -> int:
+        """Return the number of players in the table."""
         return len(self._player_labels)
 
     @property
     def player_labels(self) -> Sequence[str]:
+        """Return the player labels in table order."""
         return self._player_labels
 
     def clear(self) -> None:
+        """Remove all collected rows."""
         self._rows.clear()
 
     def add(self, category: str, player_index: int, delta: int = 1) -> None:
@@ -35,7 +40,7 @@ class InMemoryStatsStore:
 
         row = self._rows.get(category)
         if row is None:
-            row = [0] * self.player_count
+            row = cast(list[Value], [0] * self.player_count)
             self._rows[category] = row
         row[player_index] = int(row[player_index]) + int(delta)
 

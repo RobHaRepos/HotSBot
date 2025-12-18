@@ -1,6 +1,9 @@
+"""Scrape and cache Heroes of the Storm hero portrait images."""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from html.parser import HTMLParser
 import io
 import json
 import logging
@@ -17,6 +20,7 @@ HEROES_URL_EN_GB = "https://heroesofthestorm.blizzard.com/en-gb/heroes"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OUTPUT_DIR = REPO_ROOT / "data" / "images" / "heroes"
 CACHE_PATH = REPO_ROOT / "data" / "hero_image_map_cache.json"
+DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -24,6 +28,7 @@ DEFAULT_UA = (
 )
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class HeroAsset:
@@ -37,18 +42,71 @@ HeroMap = dict[str, HeroAsset]
 _HERO_MAP_MEMO: HeroMap | None = None
 
 
+class _BlzHeroesParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.results: list[dict[str, str]] = []
+        self._current: dict[str, str] | None = None
+        self._in_card: bool = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        t = tag.casefold()
+        attrs_dict = {k.casefold(): (v or "") for k, v in attrs}
+
+        if t == "blz-hero-card":
+            self._in_card = True
+            self._current = {
+                "name": attrs_dict.get("hero-name", "").strip(),
+                "icon": attrs_dict.get("icon", "").strip(),
+                "portrait": "",
+            }
+            return
+
+        if self._in_card and self._current is not None and t == "blz-image":
+            if attrs_dict.get("slot", "") != "image":
+                return
+            src = attrs_dict.get("src", "").strip()
+            if src and _is_portrait_url(src):
+                self._current["portrait"] = src
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.casefold() != "blz-hero-card":
+            return
+        if self._current is not None and self._current.get("name"):
+            self.results.append(self._current)
+        self._current = None
+        self._in_card = False
+
+
 def _is_portrait_url(url: str) -> bool:
     """Return True if url looks like a hero portrait URL."""
     return "card_portrait" in (url or "")
 
 
+def _read_json_dict(path: Path) -> dict[str, object] | None:
+    """Read a JSON object from disk, returning None on failure."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
 def _load_cached_hero_map(cache_path: Path) -> HeroMap | None:
     """Load hero map from cache if it appears valid."""
-    data = json.loads(cache_path.read_text(encoding="utf-8"))
-    cached = {
-        hero: HeroAsset(name=info["name"], img_url=info["img_url"])
-        for hero, info in data.items()
-    }
+    data = _read_json_dict(cache_path)
+    if not data:
+        return None
+
+    cached: HeroMap = {}
+    for hero, info in data.items():
+        if not isinstance(hero, str) or not isinstance(info, dict):
+            continue
+        name = info.get("name")
+        img_url = info.get("img_url")
+        if isinstance(name, str) and isinstance(img_url, str):
+            cached[hero] = HeroAsset(name=name, img_url=img_url)
+
     # Older cache versions stored role icons; only trust portrait URLs.
     if any(_is_portrait_url(v.img_url) for v in cached.values()):
         return cached
@@ -68,37 +126,17 @@ def _pick_best_image_url(portrait: str, icon: str) -> str:
 
 def _extract_hero_cards_from_html(html: str) -> list[dict[str, str]]:
     """Extract hero-name and portrait/icon URLs from the heroes page HTML."""
-    pattern = re.compile(
-        r"<blz-hero-card\b(?P<attrs>[^>]*)>\s*(?P<body>.*?)</blz-hero-card>",
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-
-    results: list[dict[str, str]] = []
-    for match in pattern.finditer(html):
-        attrs = match.group("attrs") or ""
-        body = match.group("body") or ""
-
-        name_m = re.search(r'\bhero-name="([^"]+)"', attrs)
-        if not name_m:
-            continue
-        name = name_m.group(1).strip()
-
-        icon_m = re.search(r'\bicon="([^"]+)"', attrs)
-        icon = (icon_m.group(1).strip() if icon_m else "")
-
-        portrait_m = re.search(
-            r'<blz-image\b[^>]*\bslot="image"[^>]*\bsrc="([^"]*card_portrait[^"]*)"',
-            body,
-            flags=re.IGNORECASE,
-        )
-        portrait = (portrait_m.group(1).strip() if portrait_m else "")
-
-        results.append({"name": name, "portrait": portrait, "icon": icon})
-
-    return results
+    parser = _BlzHeroesParser()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:
+        # If the markup is malformed, return whatever was collected.
+        logger.debug("HTMLParser failed while extracting hero cards", exc_info=True)
+    return parser.results
 
 
-def _fetch_html(url: str, *, timeout: int = 30) -> str:
+def _fetch_html(url: str, *, timeout: int = DEFAULT_TIMEOUT_SECONDS) -> str:
     """Fetch HTML from the given URL."""
     response = requests.get(url, headers={"User-Agent": DEFAULT_UA}, timeout=timeout)
     response.raise_for_status()
@@ -121,11 +159,16 @@ def _scrape_cards_via_playwright(heroes_url: str, *, headless: bool) -> list[dic
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=headless)
-            context = browser.new_context(user_agent=DEFAULT_UA, locale="de-DE")
-            page = context.new_page()
-            page.goto(heroes_url, wait_until="networkidle", timeout=60_000)
-            html = page.content()
-            browser.close()
+            try:
+                context = browser.new_context(user_agent=DEFAULT_UA, locale="de-DE")
+                try:
+                    page = context.new_page()
+                    page.goto(heroes_url, wait_until="networkidle", timeout=60_000)
+                    html = page.content()
+                finally:
+                    context.close()
+            finally:
+                browser.close()
         return _extract_hero_cards_from_html(html)
     except Exception:
         logger.exception("Failed to scrape hero cards via Playwright")
@@ -149,6 +192,7 @@ def _build_hero_map(results: list[dict[str, str]]) -> HeroMap:
         hero_map[_normalize_hero_name(name)] = HeroAsset(name=name, img_url=img_url)
     return hero_map
 
+
 def _normalize_hero_name(hero_name: str) -> str:
     """Normalize a hero name for matching."""
     hero_name = hero_name.strip().casefold()
@@ -157,6 +201,7 @@ def _normalize_hero_name(hero_name: str) -> str:
     hero_name = re.sub(r"[^a-z0-9]", " ", hero_name).strip()
     return hero_name
 
+
 def _safe_filename(s: str) -> str:
     """Convert a string to a safe filename."""
     s = s.strip()
@@ -164,6 +209,7 @@ def _safe_filename(s: str) -> str:
     s = "".join(ch for ch in s if not unicodedata.combining(ch))
     s = re.sub(r"[^a-zA-Z0-9_-]+", "_", s).strip("_")
     return s or "hero"
+
 
 def scrape_hero_image_map(
     heroes_url: str = HEROES_URL_EN_GB,
@@ -210,22 +256,22 @@ def download_hero_image(
     hero = _normalize_hero_name(hero_name)
     if hero not in hero_map:
         raise ValueError(f"Hero '{hero_name}' not found in hero map.")
-    
+
     asset = hero_map[hero]
     file_name = _safe_filename(asset.name) + ".png"
     output_path = out_dir / file_name
     source_url_path = output_path.with_suffix(output_path.suffix + ".url")
-    
+
     if output_path.exists() and not force_redownload and source_url_path.exists():
         try:
             if source_url_path.read_text(encoding="utf-8").strip() == asset.img_url:
                 return output_path
         except Exception:
             logger.debug("Failed to read %s", source_url_path, exc_info=True)
-    
+
     response = requests.get(asset.img_url, headers={"User-Agent": DEFAULT_UA}, timeout=timeout)
     response.raise_for_status()
-    
+
     img = Image.open(io.BytesIO(response.content)).convert("RGBA")
     img = cut_bottom_to_quadrilateral(img, cut_ratio=0.18)
     img = round_corners(img, radius_ratio=0.10)
@@ -235,7 +281,7 @@ def download_hero_image(
         source_url_path.write_text(asset.img_url, encoding="utf-8")
     except Exception:
         logger.debug("Failed to write %s", source_url_path, exc_info=True)
-    
+
     return output_path
 
 

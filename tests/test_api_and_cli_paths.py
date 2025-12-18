@@ -1,6 +1,7 @@
+"""Tests for FastAPI endpoints and CLI parsing behavior."""
+
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
 from types import SimpleNamespace
@@ -62,9 +63,22 @@ def test_parser_api_maps_unknown_errors_to_500(monkeypatch: pytest.MonkeyPatch):
     assert resp.status_code == 500
 
 
+def test_health_check_endpoint_returns_ok():
+    """Return OK payload from the health endpoint."""
+    with TestClient(parser_api.app) as client:
+        resp = client.get("/health")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
 def test_parser_api_upload_cleans_up_even_if_unlink_fails(monkeypatch: pytest.MonkeyPatch):
     """Test that the uploaded file is cleaned up even if unlink raises an exception."""
-    monkeypatch.setattr(parser_api.parse_service, "parse_and_build_table", lambda p: (_ for _ in ()).throw(ValueError("bad replay")))
+
+    def boom(_p: str) -> bytes:
+        raise ValueError("bad replay")
+
+    monkeypatch.setattr(parser_api.parse_service, "parse_and_build_table", boom)
 
     def unlink_raises(self: Path):
         raise OSError("locked")
@@ -84,7 +98,7 @@ def test_parse_replay_with_cli_skips_failed_flags(monkeypatch: pytest.MonkeyPatc
     """Test that parse_replay_with_cli skips flags that fail."""
     monkeypatch.setattr(parse_service, "OUTPUT_DIR", tmp_path)
 
-    def fake_run(_cmd, capture_output=True, text=True):
+    def fake_run(_cmd, **_kwargs):
         return SimpleNamespace(returncode=1, stdout="", stderr="bad")
 
     monkeypatch.setattr(parse_service.subprocess, "run", fake_run)
@@ -97,7 +111,7 @@ def test_parse_replay_with_cli_returns_empty_on_exception(monkeypatch: pytest.Mo
     """Test that parse_replay_with_cli returns empty dict if an exception occurs."""
     monkeypatch.setattr(parse_service, "OUTPUT_DIR", tmp_path)
 
-    def fake_run(_cmd, capture_output=True, text=True):
+    def fake_run(_cmd, **_kwargs):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(parse_service.subprocess, "run", fake_run)

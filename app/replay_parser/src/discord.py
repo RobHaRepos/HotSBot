@@ -23,11 +23,15 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 class ResponderFn(Protocol):
-    def __call__(self, content: str, *, ephemeral: bool = True) -> Awaitable[None]: ...
+    def __call__(self, content: str, *, ephemeral: bool = True) -> Awaitable[None]:
+        """Send a short response back to the user (typically ephemeral)."""
+        ...
 
 
 class ChannelSendFn(Protocol):
-    def __call__(self, *args: Any, **kwargs: Any) -> Awaitable[Any]: ...
+    def __call__(self, *args: Any, **kwargs: Any) -> Awaitable[Any]:
+        """Send a message/file to a channel-like target."""
+        ...
 
 
 async def delete_message_if_bot(message: discord.Message, respond_fn: ResponderFn | None = None) -> bool:
@@ -189,6 +193,7 @@ async def on_ready() -> None:
 async def delete_message_context(interaction: discord.Interaction, message: discord.Message):
     """Context-menu (right-click -> Apps -> Delete message) handler."""
     async def responder(content: str, *, ephemeral: bool = True) -> None:
+        """Reply to the interaction (or follow-up if already responded)."""
         if interaction.response.is_done():
             await interaction.followup.send(content, ephemeral=ephemeral)
             return
