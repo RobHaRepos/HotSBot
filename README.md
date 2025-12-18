@@ -16,6 +16,13 @@ python -m pip install -r requirements.txt
 pytest
 ```
 
+Update heroprotocol first:
+```powershell
+git submodule update --init --recursive
+pip install -e .\heroprotocol
+```
+
+
 Run the API:
 
 ```powershell
