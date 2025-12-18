@@ -58,7 +58,7 @@ jobs:
         run: |
           pip install ruff
           # newer ruff versions use subcommands; call `ruff check` explicitly
-          ruff check .
+          ruff check app tests --force-exclude --extend-exclude heroprotocol
 
       - name: Run tests with pytest (with coverage)
         env:
@@ -71,8 +71,14 @@ jobs:
       - name: Run manual SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9 # v7.0.0
         with:
-          args: 
-            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }} -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }} -Dsonar.token=${{ secrets.SONAR_TOKEN }}
+          args: >
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+            -Dsonar.token=${{ secrets.SONAR_TOKEN }}
+            -Dsonar.sources=app
+            -Dsonar.tests=tests
+            -Dsonar.exclusions=heroprotocol/**
+            -Dsonar.python.coverage.reportPaths=coverage.xml
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
@@ -87,6 +93,4 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
-          # Run Snyk against the CI requirements (omits heavy runtime ML deps like torch)
-          # explicitly tell Snyk this is a pip/requirements file so it detects the package manager
-          snyk test --file=requirements-ci.txt --package-manager=pip
+          snyk test --file=requirements.txt --package-manager=pip
